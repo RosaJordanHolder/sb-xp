@@ -202,13 +202,6 @@ def draw_pitch(l = 12, linecolor="white", pitchcolor="seagreen", horizontal = Tr
 # In[ ]:
 
 
-fig, ax, plt = draw_pitch()
-plt.show()
-
-
-# In[ ]:
-
-
 def titling(fig, ax, plt, c1, x, texty, deltay, t, h):
     for i in range(len(t)):
         if i == 0:
@@ -308,6 +301,31 @@ def coordplot(x, y, horizontal=True, direction="right", half=False, attack = Tru
 # In[ ]:
 
 
+def coordplot(x, y, horizontal=True, direction="right", half=False, attack = True):
+    if direction == "right":
+        y = 80 - y
+        if half:
+            if not attack:
+                x = 120 - x
+    elif direction == "up":
+        x, y = y, x
+        if half:
+            if not attack:
+                x = 120 - x
+    elif direction == "down":
+        x, y = 80 - y,  120 - x
+        if half:
+            if not attack:
+                x = 120 - x
+    else:
+        x = 120 - x
+        
+    return x, y   
+
+
+# In[ ]:
+
+
 def matchloc(matchDataFrame):
     DataFrame = matchDataFrame
     fig, ax, plt = draw_pitch(linecolor="grey", pitchcolor="white")
@@ -334,11 +352,12 @@ def matchloc(matchDataFrame):
                 direction = "right"
                 col = "C1"
                 piece = -1
-                
+                cmap = cm.get_cmap("Spectral")
             else:
                 direction = "left"
                 col = "C0"
                 piece = 1
+                cmap = cm.get_cmap("Spectral")
                 
             x1 = np.array([n[0] for n in df.location.values])
             y1 = np.array([n[1] for n in df.location.values])
@@ -842,6 +861,83 @@ def season_summary(smDataFrame):
 # In[ ]:
 
 
+def pressuremap(DataFrame, **kwargs):
+    match_id_key = "match_id"
+    grouping = [match_id_key, "team_name"]
+    player = "player"
+    a = (DataFrame.type_name == "Pressure")
+    if kwargs is not None:
+        for key in kwargs.keys():
+            if key in ["player", "team"]:
+                b = a & (DataFrame[key + "_name"] == kwargs[key])
+        
+        if match_id_key in kwargs.keys():
+            c = b & (DataFrame[match_id_key] == kwargs[match_id_key])
+        else:
+            c = b
+        
+        
+        if player in kwargs.keys():
+            grouping += [player + "_name"]
+              
+    df = DataFrame.loc[c, :]
+    dfloc = df.location
+    
+    horiz = True
+    fig, ax, plt = draw_pitch(l = 10, linecolor="grey", pitchcolor="white", horizontal = horiz)
+    
+    x = np.array([n[0] for n in dfloc])
+    y = np.array([n[1] for n in dfloc])
+
+    xa, ya = coordplot(x, y, horizontal = horiz, direction = "right")
+    
+    binm = 10
+    binn = 6
+    bins = [binm, binn]
+    if not horiz:
+        bins[0], bins[1] = bins[1], bins[0]
+        
+    r = [[0, 120], [0, 80]]
+    mdf = DataFrame.groupby("match_id")
+    matches = mdf.time.count()
+    minutes = mdf.time.max().sum()
+    avg = DataFrame.loc[a, :]
+    avgx = np.array([n[0] for n in avg.location])
+    avgy = np.array([n[1] for n in avg.location])
+    h, xedge, yedge = np.histogram2d(x=avgx, y=avgy, bins = bins, range = r)
+    
+    h1, xedges1, yedges1 = np.histogram2d(xa, ya, bins= bins, range = r)
+    minutes1 = df.groupby("match_id").time.max().sum()
+    
+    mx = 0.1 * ((24/(binm * binn)) ** 0.5)
+    data = h1.T/minutes1 - h.T/(minutes*2)
+    plt.imshow(data, cmap = "Spectral", alpha = 0.7, vmin = -mx, vmax = mx, extent=[xedges1[0], xedges1[-1], yedges1[0], yedges1[-1]])
+    plt.colorbar()
+    
+    marker = ["o", "s"]
+    for i in range(2):
+        reg = df.loc[df.pressure_regains == i, "location"]
+        x = np.array([n[0] for n in reg])
+        y = np.array([n[1] for n in reg])
+        
+        xa, ya = coordplot(x, y, horizontal = horiz, direction = "right")
+        
+        plt.scatter(xa, ya, c = "white", edgecolor = "k", marker = marker[i], s = 6, linewidths = 0.35)
+        
+    if "player" in kwargs.keys():
+        title = kwargs["player"]
+    elif "team" in kwargs.keys():
+        title = kwargs["team"]
+    
+    plt.title(title + " Pressure Events & Heatmap")
+    
+    plt.tight_layout()
+    return fig, ax, plt
+
+
+# In[ ]:
+
+
 comps = json_loads(dataFolder + "competitions.json")
 
 
@@ -851,15 +947,16 @@ comps = json_loads(dataFolder + "competitions.json")
 LICT = []
 for com in comps:
     start = time.time()
-    DICT = {"comp_id": com["competition_id"]}
-    fp =  matchesFolder + str(com["competition_id"]) + ".json"
+    DICT = {"comp_id": com["competition_id"], "season_id": com["season_id"]}
+    fp = matchesFolder + "{}\\{}.json".format(com["competition_id"], com["season_id"])
+    print(fp)
     d = seasondataframe(fp)
     DICT["seasondataframe"] = d
     for on in ["player", "team"]:
         df = season_matches_summary(d, on)
         DICT[on+"sms"] = df
         DICT[on+"sesu"] = season_summary(df)
-    
+
     LICT.append(DICT)
     print(str(time.time() - start)[:5])
 
@@ -869,7 +966,7 @@ for com in comps:
 
 for com in comps:
     for line in LICT:
-        if line["comp_id"] == com["competition_id"]:
+        if line["comp_id"] == com["competition_id"] and line["season_id"] == com["season_id"]:
             fig, ax, plt = barxgchart(line["playersesu"], com)
             plt.show()
             
@@ -884,26 +981,92 @@ for com in comps:
                 else:
                     for i in range(len(z)):
                         z[i][2].show()
-                
 
 
 # In[ ]:
 
 
 for com in comps:
-    if com["competition_name"] == "Women's World Cup":
-        matches = json_loads(matchesFolder + "{}.json".format(com["competition_id"]))
-        for match in matches:
-            start = time.time()
-            a, teams = matchplots(eventsFolder + "{}.json".format(match["match_id"]))
-            print(teams)
-            for i in range(len(a)):
-                a[i][0][2].show()
-            print(time.time() - start)            
+    matches = json_loads(matchesFolder + "{}\\{}.json".format(com["competition_id"], com["season_id"]))
+    for match in matches:
+        start = time.time()
+        a, teams = matchplots(eventsFolder + "{}.json".format(match["match_id"]))
+        print(teams)
+        for i in range(len(a)):
+            a[i][0][2].show()
+        print(time.time() - start)            
 
 
 # In[ ]:
 
 
+df = matchdataframe(eventsFolder + "{}.json".format(22984))
+for line in LICT:
+    if line["comp_id"]:
+        df = line["seasondataframe"]
+        for team in df.team_name.unique():
+            fig, ax, plt = pressuremap(df, team=team)
+            plt.show()
 
+
+# In[ ]:
+
+
+def shotheatmap(DataFrame, team):
+    horiz = False
+    attack = True
+    half = True
+    direction = "up"
+    fig, ax, plt = draw_pitch(l = 10, linecolor="grey", pitchcolor="white", half = half, attack = attack, horizontal = horiz)
+    
+    cmap = cm.get_cmap("Spectral")
+    filt = (DataFrame.type_name == "Shot") & (DataFrame.shot_type_name != "Penalty")
+    totaldf = DataFrame.loc[filt, :]
+    teamdf = DataFrame.loc[filt&(DataFrame.team_name == team)]
+    
+    xa = np.array([n[0] for n in teamdf.location])
+    ya = np.array([n[1] for n in teamdf.location])
+    c = teamdf.shot_statsbomb_xg.values
+    
+    x, y = coordplot(xa, ya, direction = "up", attack = attack, horizontal = horiz, half = half)
+    
+    
+    bins = 8, 8
+    r = [[60, 120], [0, 80]]
+
+    X = []
+    for df in [totaldf, teamdf]:
+        mdf = df.groupby("match_id")
+        matches = len(mdf.time.count())
+        minutes = mdf.time.max().sum()
+        
+        df.x = np.array([n[0] for n in df.location])
+        df.y = np.array([n[1] for n in df.location])
+        
+        s, xedge, yedge = np.histogram2d(x=df.x, y=df.y, bins=bins, range=r)
+        
+        X.append(s/minutes*90)
+    
+    data = X[1] - X[0]/2
+    mx = 2*5/(bins[0] * bins[1])**0.5
+    plt.imshow(np.rot90(data.T, 1), cmap = "Spectral", alpha = 0.4, vmin = -mx, vmax = mx, extent=[r[1][0],r[1][1],r[0][0],r[0][1]])
+    plt.colorbar(shrink = 0.7)
+    
+    plt.scatter(x, y, s = 10, edgecolors="grey", linewidths=0.9, marker = "o", c = "white", alpha= 0.9)
+    
+    plt.title(team + " Shot Location Heatmap")
+    plt.tight_layout()
+    return fig, ax, plt
+
+
+# In[ ]:
+
+
+for line in LICT:
+    if line["comp_id"]:
+        df = line["seasondataframe"]
+        for team in df.team_name.unique():
+            fig, ax, plt = shotheatmap(df, team=team)
+            plt.show()
+            
 
